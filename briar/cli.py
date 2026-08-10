@@ -61,7 +61,7 @@ BANNER = f"""
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
 [dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.55[/bold #cc0000]
+[bold #cc0000]                  v0.4.56[/bold #cc0000]
 """
 
 def check_ollama():

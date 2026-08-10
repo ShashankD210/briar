@@ -26,6 +26,9 @@ from .idor import IDORAgent
 from .session import SessionAgent
 from .jwt import JWTAgent
 from .wordpress import WordPressAgent
+from .admin_panel import AdminPanelAgent
+from .open_redirect import OpenRedirectAgent
+from .info_disclosure import InfoDisclosureAgent
 from .csrf import CSRFAgent
 from .cors import CORSAgent
 from .open_redirect import OpenRedirectAgent
@@ -63,6 +66,9 @@ AGENTS = {
     "session": SessionAgent,
     "jwt": JWTAgent,
     "wordpress": WordPressAgent,
+    "admin_panel": AdminPanelAgent,
+    "open_redirect": OpenRedirectAgent,
+    "info_disclosure": InfoDisclosureAgent,
     "cors": CORSAgent,
     "open_redirect": OpenRedirectAgent,
     "host_header": HostHeaderAgent,

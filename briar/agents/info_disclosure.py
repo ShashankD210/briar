@@ -1,125 +1,118 @@
-"""InfoDisclosure Agent — leaked data, debug endpoints and exposed sensitive files"""
-import re
-from urllib.parse import urljoin, urlparse
+"""Info Disclosure Agent — exposed debug, phpinfo, stack traces 🕵️"""
 from briar.agents.analyzer import SecurityAnalyzer
 from briar.core.http import HTTPClient
 
-
 class InfoDisclosureAgent:
-    """Detects verbose errors, leaked paths/secrets in HTML, and exposed debug endpoints."""
+    """Detects information disclosure through misconfigured endpoints."""
 
-    EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-    AWS_KEY_RE = re.compile(r"AKIA[0-9A-Z]{16}")
-    SECRET_RE = re.compile(r"(api[_-]?key|secret)", re.I)
-    PATH_COMMENT_RE = re.compile(r"<!--.*?(?:/var/|/home/|/usr/|[A-Za-z]:\\|version\s*[:=]).*?-->", re.I | re.DOTALL)
+    INFO_PATHS = [
+        "/phpinfo.php", "/info.php", "/php_info.php", "/test.php",
+        "/.DS_Store", "/.git/HEAD", "/.svn/entries",
+        "/server-status", "/server-info", "/status",
+        "/debug", "/debug/default", "/debug/pprof",
+        "/actuator", "/actuator/mappings", "/actuator/env",
+        "/trace", "/trace.axd", "/elmah.axd",
+        "/web.config", "/web.config.bak", "/.htaccess",
+        "/error", "/errors", "/error.log",
+        "/package.json", "/package-lock.json", "/yarn.lock",
+        "/composer.json", "/composer.lock", "/Gemfile.lock",
+        "/nginx-status", "/stub_status",
+    ]
 
-    PROBES = [
-        ("/.env", "DB_", "High"),
-        ("/server-status", "Apache Server Status", "Medium"),
-        ("/phpinfo.php", "phpinfo()", "Medium"),
-        ("/debug", "DEBUG", "Medium"),
-        ("/.git/config", "[core]", "High"),
-        ("/actuator", '"_links"', "Medium"),
-        ("/actuator/env", '"propertySources"', "High"),
-        ("/.well-known/security.txt", "Contact:", "Low"),
+    ERROR_PATTERNS = [
+        (r"Stack trace:", "Stack trace exposed"),
+        (r"Traceback \(most recent call last\)", "Python traceback"),
+        (r"Fatal error:", "PHP fatal error"),
+        (r"Warning:.*on line \d+", "PHP warning"),
+        (r"Notice:.*on line \d+", "PHP notice"),
+        (r"PDOException", "DB exception"),
+        (r"SQLSTATE", "SQL error exposed"),
+        (r"Microsoft OLE DB", "DB provider leak"),
+        (r"at org\.apache", "Java stack trace"),
+        (r"Exception in thread", "Java exception"),
+        (r"node_modules/", "Node path leak"),
+        (r"\.(js|ts|jsx):\d+:\d+", "JS source path leak"),
     ]
 
     def __init__(self, provider="ollama"):
         self.analyzer = SecurityAnalyzer(provider)
-        self.http = HTTPClient(timeout=10)
+        self.http = HTTPClient(timeout=8)
         self.name = "InfoDisclosure"
 
-    def scan(self, url: str, tech_context: str = "", **kwargs) -> dict:
+    def scan(self, url: str, **kwargs) -> dict:
         findings = []
-        try:
-            resp = self.http.get(url)
-            text = resp.text or ""
+        base = url.rstrip("/")
 
-            err = self.http.detect_error(text)
-            if err:
-                findings.append({
-                    "type": "Verbose error / stack trace exposed",
-                    "severity": "Medium",
-                    "agent": self.name,
-                    "url": resp.url,
-                    "evidence": f"Pattern matched: {err}",
-                })
-
-            comment = self.PATH_COMMENT_RE.search(text)
-            if comment:
-                findings.append({
-                    "type": "HTML comment leaks path/version info",
-                    "severity": "Low",
-                    "agent": self.name,
-                    "url": resp.url,
-                    "evidence": comment.group(0)[:200],
-                })
-
-            aws = self.AWS_KEY_RE.search(text)
-            if aws:
-                findings.append({
-                    "type": "AWS access key exposed in response",
-                    "severity": "High",
-                    "agent": self.name,
-                    "url": resp.url,
-                    "evidence": aws.group(0),
-                })
-            elif self.SECRET_RE.search(text):
-                findings.append({
-                    "type": "Possible secret/api_key reference in response",
-                    "severity": "Low",
-                    "agent": self.name,
-                    "url": resp.url,
-                    "evidence": "api_key/secret keyword present in body",
-                })
-
-            emails = self.EMAIL_RE.findall(text)
-            if emails:
-                findings.append({
-                    "type": "Email address(es) disclosed in response",
-                    "severity": "Info",
-                    "agent": self.name,
-                    "url": resp.url,
-                    "evidence": ", ".join(sorted(set(emails))[:5]),
-                })
-        except Exception:
-            pass
-
-        parsed = urlparse(url)
-        root = f"{parsed.scheme}://{parsed.netloc}/" if parsed.scheme and parsed.netloc else url
-        for path, marker, sev in self.PROBES:
+        # 1. Scan known info disclosure paths
+        for path in self.INFO_PATHS[:25]:
             try:
-                candidate = urljoin(root, path.lstrip("/"))
-                resp = self.http.get(candidate)
-                if resp.status_code == 200 and marker.lower() in (resp.text or "").lower():
+                r = self.http.get(f"{base}{path}")
+                if r.status_code == 200 and len(r.text) > 20:
+                    import re
+                    sev = "High" if any(x in path for x in [".env", ".git", ".svn", "actuator/env"]) else "Medium"
                     findings.append({
-                        "type": f"Exposed endpoint: {path}",
+                        "type": f"Info Disclosure: {path}",
                         "severity": sev,
                         "agent": self.name,
-                        "url": resp.url,
-                        "evidence": f"HTTP 200 with marker '{marker}'",
+                        "path": path,
+                        "status": r.status_code,
+                        "confirmed": True,
+                        "poc": f"curl '{base}{path}'",
                     })
-            except Exception:
-                pass
+            except: pass
 
-        analysis = f"InfoDisclosure scan complete for {url}\n\n"
-        if findings:
-            analysis += f"**{len(findings)} issues found:**\n\n"
-            for f in findings:
-                analysis += f"- {f.get('type','?')} ({f.get('severity','?')})\n"
-        else:
-            analysis += "No issues detected.\n"
-        analysis += "\n---\n\nLLM analysis:\n"
-        result = self.analyzer.analyze_endpoint(url, "GET", tech_context=tech_context, source_hint=analysis)
+        # 2. Check main page for error disclosures
+        try:
+            r = self.http.get(base)
+            html = r.text[:5000]
+            headers = str(r.headers)
+            import re
+            for pattern, desc in self.ERROR_PATTERNS:
+                if re.search(pattern, html + headers):
+                    findings.append({
+                        "type": f"Info Disclosure: {desc}",
+                        "severity": "Medium",
+                        "agent": self.name,
+                        "confirmed": True,
+                        "analysis": f"Error/stack trace disclosed in response: {desc}",
+                    })
+                    break
+        except: pass
+
+        # 3. Check server header for version info
+        try:
+            server = r.headers.get("Server", "")
+            if server and len(server) > 10:  # Has version info
+                findings.append({
+                    "type": "Info Disclosure: Server version",
+                    "severity": "Low",
+                    "agent": self.name,
+                    "server": server,
+                    "confirmed": True,
+                })
+        except: pass
+
+        # 4. X-Powered-By
+        try:
+            powered = r.headers.get("X-Powered-By", "")
+            if powered:
+                findings.append({
+                    "type": "Info Disclosure: X-Powered-By",
+                    "severity": "Low",
+                    "agent": self.name,
+                    "header": powered,
+                    "confirmed": True,
+                })
+        except: pass
+
+        total = len(findings)
+        analysis = f"Info disclosure scan: {total} issues found.\n"
+        for f in findings:
+            analysis += f"- [{f['severity']}] {f['type']}\n"
+
+        result = self.analyzer.analyze_endpoint(url, analysis=analysis)
         result["real_findings"] = findings
         result["agent"] = self.name
-        result["type"] = "Information Disclosure"
-        result["severity"] = self._severity(findings)
+        result["type"] = "Info Disclosure"
+        result["severity"] = "High" if any(f["severity"] == "High" for f in findings) else ("Medium" if findings else "Info")
         return result
-
-    @staticmethod
-    def _severity(findings):
-        for s in ["Critical", "High", "Medium", "Low", "Info"]:
-            if any(f.get("severity") == s for f in findings):
-                return s
-        return "Info"
