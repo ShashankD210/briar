@@ -9,3 +9,4 @@ workspaces/
 *.log
 .env
 ~/.briar/
+*.egg-info/
