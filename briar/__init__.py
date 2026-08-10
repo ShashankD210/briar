@@ -1,5 +1,5 @@
 """Briar — Autonomous AI Pentester 🥀"""
-__version__ = "0.4.56"
+__version__ = "0.4.57"
 
 # Scanners talk to hosts with broken TLS on purpose — silence the noise.
 try:

@@ -9,6 +9,19 @@ from .cve import CVEAgent
 from .secrets import SecretsAgent
 from .info_disclosure import InfoDisclosureAgent
 from .backup_files import BackupFilesAgent
+from .cache import CacheAgent
+from .cors import CORSAgent
+from .crlf import CRLFAgent
+from .graphql import GraphQLAgent
+from .headers import HeadersAgent
+from .host_header import HostHeaderAgent
+from .idor import IDORAgent
+from .nosql import NoSQLAgent
+from .nuclei import NucleiAgent
+from .session import SessionAgent
+from .ssti import SSTIAgent
+from .xxe import XXEAgent
+from .backup_files import BackupFilesAgent
 from .admin_panel import AdminPanelAgent
 from .injection import InjectionAgent
 from .nosql import NoSQLAgent
@@ -29,6 +42,19 @@ from .wordpress import WordPressAgent
 from .admin_panel import AdminPanelAgent
 from .open_redirect import OpenRedirectAgent
 from .info_disclosure import InfoDisclosureAgent
+from .backup_files import BackupFilesAgent
+from .cache import CacheAgent
+from .cors import CORSAgent
+from .crlf import CRLFAgent
+from .graphql import GraphQLAgent
+from .headers import HeadersAgent
+from .host_header import HostHeaderAgent
+from .idor import IDORAgent
+from .nosql import NoSQLAgent
+from .nuclei import NucleiAgent
+from .session import SessionAgent
+from .ssti import SSTIAgent
+from .xxe import XXEAgent
 from .csrf import CSRFAgent
 from .cors import CORSAgent
 from .open_redirect import OpenRedirectAgent
@@ -44,6 +70,19 @@ AGENTS = {
     "headers": HeadersAgent,
     "secrets": SecretsAgent,
     "info_disclosure": InfoDisclosureAgent,
+    "backup_files": BackupFilesAgent,
+    "cache": CacheAgent,
+    "cors": CORSAgent,
+    "crlf": CRLFAgent,
+    "graphql": GraphQLAgent,
+    "headers": HeadersAgent,
+    "host_header": HostHeaderAgent,
+    "idor": IDORAgent,
+    "nosql": NoSQLAgent,
+    "nuclei": NucleiAgent,
+    "session": SessionAgent,
+    "ssti": SSTIAgent,
+    "xxe": XXEAgent,
     "injection": InjectionAgent,
     "xss": XSSAgent,
     "ssrf": SSRFAgent,
@@ -69,6 +108,19 @@ AGENTS = {
     "admin_panel": AdminPanelAgent,
     "open_redirect": OpenRedirectAgent,
     "info_disclosure": InfoDisclosureAgent,
+    "backup_files": BackupFilesAgent,
+    "cache": CacheAgent,
+    "cors": CORSAgent,
+    "crlf": CRLFAgent,
+    "graphql": GraphQLAgent,
+    "headers": HeadersAgent,
+    "host_header": HostHeaderAgent,
+    "idor": IDORAgent,
+    "nosql": NoSQLAgent,
+    "nuclei": NucleiAgent,
+    "session": SessionAgent,
+    "ssti": SSTIAgent,
+    "xxe": XXEAgent,
     "cors": CORSAgent,
     "open_redirect": OpenRedirectAgent,
     "host_header": HostHeaderAgent,
