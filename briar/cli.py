@@ -61,7 +61,7 @@ BANNER = f"""
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
 [dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.57[/bold #cc0000]
+[bold #cc0000]                  v0.4.58[/bold #cc0000]
 """
 
 def check_ollama():
@@ -187,6 +187,7 @@ def demo():
 @click.option("--quick", is_flag=True, help=f"Quick scan ({len(agents_for_mode('quick'))} agents)")
 @click.option("--deep", is_flag=True, help=f"Deep scan (all {TOTAL_AGENTS} agents + browser)")
 @click.option("--resume", "resume_ws", help="Resume a workspace by name")
+@click.option("--output-json", "json_output", help="Export findings as JSON")
 @click.option("--lang", default=None, help="Report language: en, fr, es, de, it, pt, nl, ar")
 def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, lang):
     """Run a pentest scan"""
@@ -475,7 +476,37 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, lang)
         except Exception:
             pass
         
-        # Reports
+        # JSON export
+    if json_output:
+        import json
+        json_data = {
+            "tool": "Briar",
+            "version": "0.4.58",
+            "target": url,
+            "mode": mode,
+            "provider": provider,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "findings_count": len(findings),
+            "confirmed": sum(1 for f in findings if f.get("confirmed")),
+            "findings": [{
+                "id": f"FIN-{i+1:03d}",
+                "type": f.get("type","?"),
+                "severity": f.get("severity","?"),
+                "agent": f.get("agent","?"),
+                "endpoint": f.get("url", url),
+                "param": f.get("param",""),
+                "payload": f.get("payload",""),
+                "confirmed": f.get("confirmed", False),
+                "poc": f.get("poc",""),
+                "analysis": f.get("analysis","")[:500]
+            } for i, f in enumerate(findings)]
+        }
+        os.makedirs(os.path.dirname(os.path.abspath(json_output)) or ".", exist_ok=True)
+        with open(json_output, "w") as jf:
+            json.dump(json_data, jf, indent=2, ensure_ascii=False)
+        console.print(f"[dim]JSON: {json_output}[/dim]")
+
+    # Reports
         progress.update(task, description="[green]Generating reports...")
         from briar.reports.generator import ReportGenerator
         gen = ReportGenerator(url, findings, output)
