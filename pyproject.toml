@@ -8,7 +8,7 @@ version = "0.4.57"
 description = "Autonomous AI Pentester — find vulnerabilities before hackers do"
 readme = "README.md"
 license = {text = "AGPL-3.0"}
-authors = [{name = "Stiimy", email = "stiimy@briar.dev"}]
+authors = [{name = "Stiimy"}]
 keywords = ["security", "pentest", "vulnerability", "owasp", "ai", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
