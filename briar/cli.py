@@ -61,7 +61,7 @@ BANNER = f"""
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
 [dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.59[/bold #cc0000]
+[bold #cc0000]                  v0.4.60[/bold #cc0000]
 """
 
 def check_ollama():
@@ -189,7 +189,7 @@ def demo():
 @click.option("--resume", "resume_ws", help="Resume a workspace by name")
 @click.option("--output-json", "json_output", help="Export findings as JSON")
 @click.option("--lang", default=None, help="Report language: en, fr, es, de, it, pt, nl, ar")
-def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_output):
+def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_output, lang):
     """Run a pentest scan"""
     # Load saved config (mandatory if no -p flag)
     saved = load_saved_config()
@@ -481,7 +481,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         import json
         json_data = {
             "tool": "Briar",
-            "version": "0.4.59",
+            "version": "0.4.60",
             "target": url,
             "mode": mode,
             "provider": provider,
