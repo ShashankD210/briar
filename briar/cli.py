@@ -61,7 +61,7 @@ BANNER = f"""
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
 [dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.61[/bold #cc0000]
+[bold #cc0000]                  v0.4.62[/bold #cc0000]
 """
 
 def check_ollama():
@@ -481,7 +481,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         import json
         json_data = {
             "tool": "Briar",
-            "version": "0.4.61",
+            "version": "0.4.62",
             "target": url,
             "mode": mode,
             "provider": provider,
@@ -507,39 +507,35 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         console.print(f"[dim]JSON: {json_output}[/dim]")
 
     # Reports
-        console.print("[green]Generating reports...[/green]")
-        from briar.reports.generator import ReportGenerator
-        gen = ReportGenerator(url, findings, output)
-        reports = gen.all_formats()
-        
-        # Obsidian
-        from briar.reports.obsidian import ObsidianGenerator
-        og = ObsidianGenerator(url, findings, f"{output}/obsidian")
-        og.generate()
+    console.print("[green]Generating reports...[/green]")
+    from briar.reports.generator import ReportGenerator
+    gen = ReportGenerator(url, findings, output)
+    reports = gen.all_formats()
 
-        # Expert report — professional HTML + PDF (print-ready)
-        expert_res = {}
-        try:
-            console.print("[green]Generating expert report...[/green]")
-            from briar.reports.expert import ExpertReport
-            expert_res = ExpertReport(url, findings, output,
-                {"scanner": "Briar", "version": __version__, "mode": mode,
-                 "provider": provider, "lang": lang}).generate()
-        except Exception:
-            pass
-        
-        # Slides
-        from briar.slides.pptx_gen import SlideGenerator
-        sg = SlideGenerator(url, findings, f"{output}/slides")
-        try: sg.pptx()
-        except: pass
-        sg.html_slides()
-        
-        progress.advance(task)
+    # Obsidian
+    from briar.reports.obsidian import ObsidianGenerator
+    og = ObsidianGenerator(url, findings, f"{output}/obsidian")
+    og.generate()
+
+    # Expert report — professional HTML + PDF (print-ready)
+    expert_res = {}
+    try:
+        console.print("[green]Generating expert report...[/green]")
+        from briar.reports.expert import ExpertReport
+        expert_res = ExpertReport(url, findings, output,
+            {"scanner": "Briar", "version": __version__, "mode": mode,
+             "provider": provider, "lang": lang}).generate()
+    except Exception:
+        pass
+    
+    # Slides
+    from briar.slides.pptx_gen import SlideGenerator
+    sg = SlideGenerator(url, findings, f"{output}/slides")
+    try: sg.pptx()
+    except: pass
+    sg.html_slides()
     
     # Severity breakdown + CONFIDENCE-WEIGHTED risk verdict.
-    # An UNPROVEN finding (heuristic, not replayed) counts a quarter — a report must
-    # not scream "High 100/100" off unconfirmed guesses. Confirmed = full weight.
     sev_counts = {lvl: sum(1 for f in findings if f.get("severity") == lvl)
                   for lvl in ["Critical", "High", "Medium", "Low", "Info"]}
     confirmed = sum(1 for f in findings if f.get("confirmed"))
