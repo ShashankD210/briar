@@ -61,7 +61,7 @@ BANNER = f"""
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
 [dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.60[/bold #cc0000]
+[bold #cc0000]                  v0.4.61[/bold #cc0000]
 """
 
 def check_ollama():
@@ -481,7 +481,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         import json
         json_data = {
             "tool": "Briar",
-            "version": "0.4.60",
+            "version": "0.4.61",
             "target": url,
             "mode": mode,
             "provider": provider,
@@ -507,7 +507,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         console.print(f"[dim]JSON: {json_output}[/dim]")
 
     # Reports
-        progress.update(task, description="[green]Generating reports...")
+        console.print("[green]Generating reports...[/green]")
         from briar.reports.generator import ReportGenerator
         gen = ReportGenerator(url, findings, output)
         reports = gen.all_formats()
@@ -520,7 +520,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, json_
         # Expert report — professional HTML + PDF (print-ready)
         expert_res = {}
         try:
-            progress.update(task, description="[green]Generating expert report...")
+            console.print("[green]Generating expert report...[/green]")
             from briar.reports.expert import ExpertReport
             expert_res = ExpertReport(url, findings, output,
                 {"scanner": "Briar", "version": __version__, "mode": mode,
