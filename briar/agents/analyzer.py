@@ -56,7 +56,7 @@ TECH_REMEDIATION_TEMPLATES = {
     "nginx": """For nginx, add to server block:
 ```nginx
 # Prevent path traversal
-location ~ \.\./ { deny all; }
+location ~ \\.\\./ { deny all; }
 # Limit file access
 location /files/ {
     root /var/www/uploads;
@@ -67,7 +67,7 @@ location /files/ {
 ```apache
 # Prevent path traversal
 RewriteEngine On
-RewriteCond %{REQUEST_URI} \.\./
+RewriteCond %{REQUEST_URI} \\.\\./
 RewriteRule .* - [F]
 # Disable directory listing
 Options -Indexes
@@ -144,11 +144,40 @@ def build_tech_context(recon_finding: Optional[dict] = None) -> str:
 
     return context
 
+# Report output languages. Key = code passed via CLI/config/dashboard.
+LANGUAGES = {
+    "en": "English", "fr": "French (Français)", "es": "Spanish (Español)",
+    "de": "German (Deutsch)", "it": "Italian (Italiano)", "pt": "Portuguese (Português)",
+    "nl": "Dutch (Nederlands)", "ar": "Arabic (العربية)",
+}
+
+
+def default_language() -> str:
+    """Report language from env (BRIAR_REPORT_LANG), falling back to English."""
+    import os
+    lang = os.environ.get("BRIAR_REPORT_LANG", "en").lower().strip()
+    return lang if lang in LANGUAGES else "en"
+
+
 class SecurityAnalyzer:
     """Core AI security analysis engine"""
 
-    def __init__(self, provider: str = "ollama", model: Optional[str] = None):
+    def __init__(self, provider: str = "ollama", model: Optional[str] = None, lang: Optional[str] = None):
         self.provider = get_provider(provider, model=model) if model else get_provider(provider)
+        self.lang = (lang or default_language()).lower()
+
+    def set_language(self, lang: str):
+        if lang and lang.lower() in LANGUAGES:
+            self.lang = lang.lower()
+
+    def _lang_directive(self) -> str:
+        """Force the model to write the whole analysis in the chosen language."""
+        if self.lang == "en" or self.lang not in LANGUAGES:
+            return ""
+        name = LANGUAGES[self.lang]
+        return (f"\n\nCRITICAL OUTPUT LANGUAGE: Write your ENTIRE response in {name}. "
+                f"Every section title, description, impact, and remediation text must be in {name}. "
+                f"Keep code, payloads, commands, CVE ids, HTTP headers and config directives verbatim (do not translate those).")
 
     def analyze_endpoint(self, url: str, method: str = "GET", source_hint: str = "",
                          tech_context: str = "", plan_context: str = "") -> dict:
@@ -163,9 +192,15 @@ Method: {method}
 
 REQUIREMENT: For each vulnerability, provide COPY-PASTE READY remediation specific to the technology stack.
 Include exact nginx/Apache/gunicorn/Flask/Express/PHP config, exact code fixes, and verification commands.
+{self._lang_directive()}
 """
         messages = [{"role": "user", "content": prompt}]
-        response = self.provider.chat(messages, system=SECURITY_ANALYST_PROMPT, max_tokens=4096)
+        # Never let a provider hiccup crash the agent and discard its real (HTTP-proven)
+        # findings — degrade to a stub note instead.
+        try:
+            response = self.provider.chat(messages, system=SECURITY_ANALYST_PROMPT, max_tokens=4096)
+        except Exception as e:
+            response = f"(LLM analysis unavailable: {e})"
         return {"url": url, "analysis": response, "raw": response}
 
     def analyze_code(self, code: str, filepath: str = "") -> dict:
@@ -180,7 +215,8 @@ File: {filepath}
 Find: SQL injection, XSS, SSRF, command injection, path traversal, auth bypass,
 deserialization, hardcoded secrets, unsafe eval, etc.
 
-For each finding, specify the exact line and how to exploit it."""
+For each finding, specify the exact line and how to exploit it.
+{self._lang_directive()}"""
         messages = [{"role": "user", "content": prompt}]
         response = self.provider.chat(messages, system=SECURITY_ANALYST_PROMPT, max_tokens=4096)
         return {"file": filepath, "analysis": response}
@@ -203,6 +239,7 @@ Create a structured report with:
 5. Recommendations
 6. Conclusion
 
-Format in Markdown. Be professional and precise."""
+Format in Markdown. Be professional and precise.
+{self._lang_directive()}"""
         messages = [{"role": "user", "content": prompt}]
         return self.provider.chat(messages, system="You are a senior security consultant writing a pentest report.", max_tokens=8192)

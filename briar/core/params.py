@@ -1,4 +1,26 @@
 """Briar Attack Params — shared parameter lists for all agents 🎯"""
+from urllib.parse import urlparse, parse_qs
+
+
+def params_from_url(url: str) -> list:
+    """Real query-string parameter names present in a URL (the actually-attackable
+    params, e.g. 'cat' in /listproducts.php?cat=1). Empty list if none/parse fails."""
+    try:
+        return list(parse_qs(urlparse(url).query).keys())
+    except Exception:
+        return []
+
+
+def merge_params(url: str, defaults: list, cap: int = 10) -> list:
+    """URL's own params first (most likely vulnerable), then generic defaults, deduped."""
+    out, seen = [], set()
+    for p in params_from_url(url) + list(defaults):
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out[:cap]
+
+
 
 INJECTION = [
     "q", "id", "page", "search", "query", "user", "email",

@@ -2,7 +2,7 @@
 import re
 from briar.agents.analyzer import SecurityAnalyzer
 from briar.core.http import HTTPClient
-from briar.core.params import RCE_CMD as RCE_PARAMS
+from briar.core.params import RCE_CMD as RCE_PARAMS, merge_params
 
 class RCEAgent:
     """Discovers Remote Code Execution vulnerabilities with real payloads"""
@@ -26,9 +26,9 @@ class RCEAgent:
     ]
 
     CMD_MARKERS = [
+        (r"uid=\d+\([^)]+\)\s+gid=\d+", "id command output"),
         (r"uid=\d+\([^)]+\)", "id command output"),
-        (r"gid=\d+\([^)]+\)", "id command output"),
-        (r"Linux\s+\S+", "uname output"),
+        (r"Linux [\w.-]+ \d+\.\d+\.\d+", "uname -a output"),
     ]
 
     def __init__(self, provider="ollama"):
@@ -39,53 +39,60 @@ class RCEAgent:
     def scan(self, url: str, tech_context: str = "", **kwargs) -> dict:
         """Scan for RCE vulnerabilities (command injection + SSTI)"""
         findings = []
-        rce_params = RCE_PARAMS
+        rce_params = merge_params(url, RCE_PARAMS)
 
-        for param in rce_params[:10]:
-            # Command injection
+        for param in rce_params[:8]:
+            # Baseline with a benign value — a real marker must be NEW vs this.
+            try:
+                base = self.http.send_payload(url, param, "briarbase123")
+                base_text = base.get("text_snippet", "") if "error" not in base else ""
+            except Exception:
+                base_text = ""
+
+            # Command injection — the command output must appear because of our payload
             for payload, cmd_type in self.CMD_PAYLOADS:
                 try:
                     result = self.http.send_payload(url, param, payload)
                     if "error" in result:
                         continue
                     text = result.get("text_snippet", "")
+                    hit = None
                     for pattern, desc in self.CMD_MARKERS:
-                        if re.search(pattern, text):
-                            findings.append({
-                                "type": f"Command Injection ({cmd_type})",
-                                "severity": "Critical",
-                                "param": param,
-                                "payload": payload,
-                                "rce_type": "command_injection",
-                                "detected": desc,
-                            })
+                        m = re.search(pattern, text)
+                        if m and m.group(0) not in base_text:
+                            hit = desc
                             break
-                    if findings:
+                    if hit:
+                        findings.append({
+                            "type": f"Command Injection ({cmd_type})",
+                            "severity": "Critical", "param": param, "payload": payload,
+                            "rce_type": "command_injection", "detected": hit,
+                        })
                         break
-                except:
+                except Exception:
                     pass
 
             if findings:
-                break  # Found RCE on this param
+                break
 
-            # SSTI
+            # SSTI — 7*7 must evaluate to 49 (new vs baseline) AND the payload must
+            # NOT be reflected raw (raw reflection = not evaluated = not vulnerable)
             for payload, engine in self.SSTI_PAYLOADS:
+                if "7*7" not in payload:
+                    continue
                 try:
                     result = self.http.send_payload(url, param, payload)
                     if "error" in result:
                         continue
                     text = result.get("text_snippet", "")
-                    if "49" in text and "7*7" in payload:
+                    if "49" in text and "49" not in base_text and payload not in text:
                         findings.append({
                             "type": f"SSTI ({engine})",
-                            "severity": "Critical",
-                            "param": param,
-                            "payload": payload,
-                            "rce_type": "ssti",
-                            "detected": "7*7 evaluated to 49",
+                            "severity": "Critical", "param": param, "payload": payload,
+                            "rce_type": "ssti", "detected": "7*7 evaluated to 49 (not reflected raw)",
                         })
                         break
-                except:
+                except Exception:
                     pass
 
             if findings:

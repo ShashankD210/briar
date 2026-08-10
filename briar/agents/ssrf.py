@@ -1,7 +1,7 @@
 """SSRF Attack Agent — Server-Side Request Forgery 🌐"""
 from briar.agents.analyzer import SecurityAnalyzer
 from briar.core.http import HTTPClient
-from briar.core.params import SSRF as SSRF_PARAMS
+from briar.core.params import SSRF as SSRF_PARAMS, merge_params
 
 class SSRFAgent:
     """Discovers SSRF vulnerabilities with real payload injection"""
@@ -36,7 +36,7 @@ class SSRFAgent:
     def scan(self, url: str, param_name: str = None, tech_context: str = "", **kwargs) -> dict:
         """Scan for SSRF with real payloads"""
         findings = []
-        ssrf_params = param_name and [param_name] or SSRF_PARAMS
+        ssrf_params = (param_name and [param_name]) or merge_params(url, SSRF_PARAMS)
 
         for param in ssrf_params[:10]:
             for payload, ssrf_type in self.SSRF_PAYLOADS:

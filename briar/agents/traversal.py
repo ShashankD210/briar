@@ -1,7 +1,7 @@
 """Path Traversal Attack Agent 🗺️"""
 from briar.agents.analyzer import SecurityAnalyzer
 from briar.core.http import HTTPClient
-from briar.core.params import TRAVERSAL as TRAVERSAL_PARAMS
+from briar.core.params import TRAVERSAL as TRAVERSAL_PARAMS, merge_params
 
 class TraversalAgent:
     """Discovers path traversal / LFI with real payloads"""
@@ -40,7 +40,7 @@ class TraversalAgent:
     def scan(self, url: str, tech_context: str = "", **kwargs) -> dict:
         """Scan for path traversal with real payloads"""
         findings = []
-        traversal_params = TRAVERSAL_PARAMS
+        traversal_params = merge_params(url, TRAVERSAL_PARAMS)
 
         for param in traversal_params:
             for payload, traversal_type in self.TRAVERSAL_PAYLOADS:

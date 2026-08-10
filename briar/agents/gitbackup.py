@@ -47,8 +47,12 @@ class GitBackupAgent:
         for path, desc in self.SENSITIVE_PATHS[:20]:
             try:
                 full_url = base + path
-                resp = self.http.get(full_url)
-                if resp.status_code in [200, 301, 302, 403]:
+                resp = self.http.get(full_url, allow_redirects=False)
+                low = resp.text[:800].lower()
+                soft_404 = any(x in low for x in ("not found", "404", "page introuvable",
+                                                  "doesn't exist", "does not exist"))
+                # Real exposure = 200 with actual content (a 403/redirect/soft-404 is NOT exposed)
+                if resp.status_code == 200 and len(resp.text.strip()) > 10 and not soft_404:
                     sev = "High"
                     if "backup" in path.lower() or ".env" in path.lower():
                         sev = "Critical"
@@ -61,7 +65,7 @@ class GitBackupAgent:
                         "agent": self.name,
                         "path": path,
                         "status": resp.status_code,
-                        "confirmed": resp.status_code == 200,
+                        "confirmed": True,
                     })
             except:
                 pass
@@ -72,7 +76,7 @@ class GitBackupAgent:
             analysis += f"- [{f['severity']}] {f['path']}: {f['type']} (HTTP {f['status']})\n"
 
         if total > 0:
-            result = self.analyzer.analyze_endpoint(url, analysis=analysis)
+            result = self.analyzer.analyze_endpoint(url, source_hint=analysis)
         else:
             result = {"analysis": "No exposed sensitive files detected."}
 

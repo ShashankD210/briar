@@ -4,7 +4,7 @@
 
 - **Owner**: Stiimy (JOBLON Keran, keran.joblon@outlook.fr, @Stiimrael_bot Telegram)
 - **Repo**: https://github.com/Stiimy/briar (public)
-- **PyPI**: `briar-pentest` (v0.4.32, package name ≠ module name)
+- **PyPI**: `briar-pentest` (v0.4.37, package name ≠ module name)
 - **License**: AGPL-3.0
 - **Python**: 3.14 on Arch Linux (PEP 668 enforced — always use `--break-system-packages` with pip)
 - **Secrets**: NEVER hardcode here (repo is public). Stored in `~/.briar/config` (chmod 600, KEY=VALUE per line):
@@ -12,12 +12,20 @@
   - `PYPI_TOKEN` — PyPI upload token for `briar-pentest`
   - Load them: `set -a; . ~/.briar/config; set +a` (or read the single key you need)
 
-## Architecture (16 agents, not 12)
+## Architecture (32 agents)
+
+> Roster + tiers are defined ONCE in `briar/agents/__init__.py` (`AGENT_ORDER` + `SCAN_MODES`). cli.py / web.py / worker.py all consume `agents_for_mode(mode)` — never hardcode the list/count again.
 
 ```
 briar/
-├── agents/        Analyzer (LLM brain), Recon, Planner, GitBackup, JWT, CVE,
-│                  Injection, XSS, SSRF, Auth, AuthZ, CSRF, Upload, Traversal, RCE, API, Secrets
+├── agents/        Analyzer (LLM brain) + 31 scan agents:
+│                  Recon, Headers, Secrets, InfoDisclosure, Injection, XSS, SSRF, CVE,
+│                  Auth, AuthZ, IDOR, RCE, Traversal, CSRF, AdminPanel, BackupFiles,
+│                  Planner, GitBackup, NoSQL, SSTI, XXE, CRLF, Upload, Session, JWT,
+│                  CORS, OpenRedirect, HostHeader, GraphQL, Cache, API, Nuclei
+│  core/          + crawler.py (spider/attack-surface), confidence.py (evidence scoring)
+│  reports/       + expert.py (expertise-grade HTML+PDF via chromium headless)
+│  Report language: --lang / dashboard dropdown / REPORT_LANG (en fr es de it pt nl ar)
 ├── providers/     11 backends: Ollama(free), OpenAI, Anthropic, DeepSeek, Groq,
 │                  Mistral, xAI/Grok, Google/Gemini, OpenRouter, Together, Custom
 ├── core/          http.py (shared HTTP), params.py (80+ attack params),
@@ -67,7 +75,8 @@ TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_TOKEN" python3 -m twine upload di
 - The dashboard's CSS is inline in `web.py` CSS variable — no external files
 - Filter-branch renames commit history — always force push after
 - `briar-pentest` is the PyPI name, but the module is `briar`
-- Agent count is 16 for `--deep`, 8 for standard, 4 for quick
+- Agent count: 32 for `--deep`, 16 for standard, 8 for quick (source: `SCAN_MODES` in `agents/__init__.py`). Nuclei is deep-only (slow).
+- Expert PDF needs chromium flags: `--headless=new --disable-dev-shm-usage --user-data-dir=<temp> --virtual-time-budget=N` + a CSP `default-src 'none'` in the HTML (else chromium hangs on remote resources in LLM analysis)
 - Don't add "Error" or noisy "Info" findings to reports
 - Ollama is NOT the default — user must run `briar setup` first
 

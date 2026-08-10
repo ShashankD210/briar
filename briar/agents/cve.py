@@ -68,7 +68,7 @@ class CVEAgent:
                 analysis += f"- {f['software']} v{f['version']} — check for known vulnerabilities\n"
 
         if total > 0:
-            result = self.analyzer.analyze_endpoint(url, analysis=analysis)
+            result = self.analyzer.analyze_endpoint(url, source_hint=analysis)
         else:
             result = {"analysis": "No versioned software detected."}
 

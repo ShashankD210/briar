@@ -161,9 +161,13 @@ A total of **{len(self.findings)}** potential security issues were identified.
             return "⚠️ openpyxl not installed"
     
     def all_formats(self) -> dict:
-        """Generate all available report formats"""
-        return {
-            "markdown": self.markdown(),
-            "word": self.word(),
-            "excel": self.excel(),
-        }
+        """Generate all report formats that actually succeeded (skip missing-dep ones)."""
+        out = {}
+        for name, fn in (("markdown", self.markdown), ("word", self.word), ("excel", self.excel)):
+            try:
+                result = fn()
+            except Exception:
+                continue
+            if result and not str(result).startswith("⚠️"):
+                out[name] = result
+        return out

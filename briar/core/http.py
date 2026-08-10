@@ -1,18 +1,50 @@
 """Briar HTTP Client — shared request engine for all agents 🌐"""
+import os
 import re
 import time
 import requests
-from urllib.parse import urlparse, parse_qs, urljoin, urlencode
+from urllib.parse import urlparse, parse_qs, urljoin, urlencode, urlunparse
 
 class HTTPClient:
     """Shared HTTP utilities for all security agents"""
 
     def __init__(self, timeout: int = 10):
         self.session = requests.Session()
+        # Browser-like UA — a "scanner" UA gets blocked by many WAFs/CDNs, which
+        # silently returns 0 pages. Override with BRIAR_USER_AGENT if needed.
         self.session.headers.update({
-            "User-Agent": "Briar/0.3 Pentest Scanner (https://github.com/Stiimy/briar)"
+            "User-Agent": os.environ.get("BRIAR_USER_AGENT",
+                "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
         })
-        self.timeout = timeout
+        # Pentest scanners MUST NOT verify TLS certs — targets often have self-signed,
+        # expired or mismatched certs (a cert error would otherwise kill the whole scan).
+        self.session.verify = False
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except Exception:
+            pass
+        # Global override: BRIAR_HTTP_TIMEOUT caps every agent's timeout at once
+        # (the main lever against hour-long scans on slow targets).
+        try:
+            self.timeout = int(os.environ.get("BRIAR_HTTP_TIMEOUT") or timeout)
+        except (TypeError, ValueError):
+            self.timeout = timeout
+        # Resilience: retry transient failures + connection pooling (safe methods only)
+        try:
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            # Light retries only: retrying read-timeouts on a slow target amplifies
+            # scan time massively (read=0). Just one quick connect/status retry.
+            retry = Retry(total=1, connect=1, read=0, backoff_factor=0.1,
+                          status_forcelist=[429, 502, 503], raise_on_status=False)
+            adapter = HTTPAdapter(max_retries=retry, pool_connections=32, pool_maxsize=32)
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
+        except Exception:
+            pass
 
     def get(self, url: str, params: dict = None, **kwargs) -> requests.Response:
         return self.session.get(url, params=params, timeout=self.timeout, **kwargs)
@@ -21,10 +53,16 @@ class HTTPClient:
         return self.session.post(url, data=data, json=json, files=files, timeout=self.timeout, **kwargs)
 
     def send_payload(self, url: str, param: str, payload: str, method: str = "GET") -> dict:
-        """Send a payload via GET or POST and return response metadata"""
+        """Send a payload via GET or POST and return response metadata.
+        GET rewrites the query so an existing param (e.g. ?cat=1) is REPLACED by the
+        payload, not appended — otherwise the vulnerable value stays benign."""
         try:
             if method.upper() == "GET":
-                resp = self.get(url, params={param: payload})
+                parsed = urlparse(url)
+                q = parse_qs(parsed.query, keep_blank_values=True)
+                q[param] = [payload]
+                target = urlunparse(parsed._replace(query=urlencode(q, doseq=True)))
+                resp = self.get(target)
             else:
                 resp = self.post(url, data={param: payload})
             return {
@@ -38,6 +76,16 @@ class HTTPClient:
             }
         except Exception as e:
             return {"error": str(e), "payload": payload, "param": param}
+
+    def batch_send(self, url: str, jobs: list, method: str = "GET", max_workers: int = 12) -> list:
+        """Fire many payloads concurrently. jobs = [(param, payload), ...].
+        Returns result dicts in the same order as jobs. This is what turns a
+        144-request serial agent (minutes) into a couple of seconds."""
+        from concurrent.futures import ThreadPoolExecutor
+        if not jobs:
+            return []
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(jobs))) as pool:
+            return list(pool.map(lambda j: self.send_payload(url, j[0], j[1], method), jobs))
 
     def extract_params(self, html: str) -> list:
         """Extract input parameter names from HTML forms"""
@@ -84,11 +132,21 @@ class HTTPClient:
         """Detect database/application errors in response"""
         if error_patterns is None:
             error_patterns = [
-                r"SQL syntax.*?error", r"mysql_fetch", r"ORA-[0-9]{5}",
-                r"PostgreSQL.*?ERROR", r"Warning.*?mysql_", r"Unclosed quotation",
-                r"Microsoft OLE DB", r"ODBC Driver", r"SQLite.*?error",
+                # MySQL/MariaDB (testphp.vulnweb.com and most PHP apps)
+                r"SQL syntax", r"you have an error in your sql",
+                r"check the manual that corresponds to your (mysql|mariadb)",
+                r"mysql_fetch", r"mysql_num_rows", r"valid MySQL result",
+                r"MySqlException", r"supplied argument is not a valid MySQL",
+                # Oracle / PostgreSQL / MSSQL / SQLite
+                r"ORA-[0-9]{4,5}", r"Oracle.*?error",
+                r"PostgreSQL.*?(ERROR|error)", r"pg_query", r"pg_exec",
+                r"Unclosed quotation", r"Microsoft OLE DB", r"ODBC.*?Driver",
+                r"Incorrect syntax near", r"SQLite.*?(error|exception)",
+                r"sqlite3.OperationalError", r"syntax error at or near",
+                r"quoted string not properly terminated",
+                # Generic app-level leaks
                 r"Traceback \(most recent call last\)", r"Fatal error",
-                r"stack trace:", r"Exception in thread",
+                r"Warning: ", r"stack trace:", r"Exception in thread",
             ]
         for pattern in error_patterns:
             if re.search(pattern, response_text, re.I):
@@ -113,3 +171,30 @@ class HTTPClient:
 
     def close(self):
         self.session.close()
+
+
+def normalize_url(url: str, timeout: int = 8) -> str:
+    """Ensure a bare domain gets the RIGHT scheme. A missing scheme breaks requests
+    (MissingSchema) and urlparse (hostname=None), silently killing all probing.
+
+    Crucially, we don't just take whichever scheme 'responds' — many hosts answer on
+    https with an empty parking/redirect page while the real app lives on http (e.g.
+    testphp.vulnweb.com). So we fetch both and keep the one whose page actually carries
+    links (a real application surface), which is what the whole scan depends on."""
+    url = (url or "").strip()
+    if not url or "://" in url:
+        return url
+    best, best_score = None, -1
+    for scheme in ("https://", "http://"):
+        candidate = scheme + url
+        try:
+            r = requests.get(candidate, timeout=timeout, allow_redirects=True, verify=False)
+            # Score by discoverable links — an empty/parking page scores ~0.
+            score = len(re.findall(r'(?:href|src|action)\s*=', r.text, re.I)) if r.status_code < 400 else 0
+            if best is None:
+                best = candidate  # first reachable scheme as fallback
+            if score > best_score:
+                best, best_score = candidate, score
+        except Exception:
+            continue
+    return best or ("https://" + url)

@@ -59,7 +59,7 @@ class JWTAgent:
                 payload = self._decode_jwt_part(parts[1])
 
                 # Check alg=none
-                alg = header.get("alg", "unknown")
+                alg = str(header.get("alg") or "unknown")
                 if alg.lower() == "none":
                     findings.append({
                         "type": "JWT: alg=none",
@@ -120,7 +120,7 @@ class JWTAgent:
             for f in findings:
                 analysis += f"- [{f['severity']}] {f['type']}: {f.get('detail','')}\n"
 
-            result = self.analyzer.analyze_endpoint(url, analysis=analysis)
+            result = self.analyzer.analyze_endpoint(url, source_hint=analysis)
             result["real_findings"] = findings
             result["agent"] = self.name
             result["type"] = "JWT Analysis"

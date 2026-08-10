@@ -10,7 +10,8 @@ class OpenAIProvider:
     def chat(self, messages: list, system: Optional[str] = None, max_tokens: int = 4096) -> str:
         try:
             import openai
-            client = openai.OpenAI(api_key=self.api_key)
+            client = openai.OpenAI(api_key=self.api_key, base_url=getattr(self, "base_url", None),
+                                   timeout=int(os.environ.get("BRIAR_LLM_TIMEOUT") or 90), max_retries=4)
             if system:
                 messages = [{"role": "system", "content": system}] + messages
             resp = client.chat.completions.create(model=self.model, messages=messages, max_tokens=max_tokens)

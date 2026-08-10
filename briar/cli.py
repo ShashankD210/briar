@@ -5,6 +5,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from briar.agents import agents_for_mode, TOTAL_AGENTS
+from briar import __version__
 
 console = Console()
 
@@ -24,7 +26,32 @@ def load_saved_config():
     return config
 
 
-BANNER = """
+PROVIDER_KEYS = {
+    "deepseek": "DEEPSEEK_API_KEY", "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY", "groq": "GROQ_API_KEY",
+    "mistral": "MISTRAL_API_KEY", "xai": "XAI_API_KEY",
+    "google": "GOOGLE_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+    "together": "TOGETHER_API_KEY", "custom": "CUSTOM_API_KEY",
+}
+
+
+def registered_providers(saved):
+    """Providers with a key registered in ~/.briar/config (order: saved default first)."""
+    saved = saved or {}
+    regs = []
+    for name, keyenv in PROVIDER_KEYS.items():
+        if saved.get(keyenv) or os.environ.get(keyenv):
+            regs.append(name)
+    if (saved.get("CUSTOM_ENDPOINT") or saved.get("CUSTOM_API_KEY")) and "custom" not in regs:
+        regs.append("custom")
+    default = saved.get("PROVIDER", "")
+    if default in regs:  # surface the saved default first
+        regs.remove(default)
+        regs.insert(0, default)
+    return regs
+
+
+BANNER = f"""
 [bold red]
   ██████╗ ██████╗ ██╗ █████╗ ██████╗ 
   ██╔══██╗██╔══██╗██║██╔══██╗██╔══██╗
@@ -33,8 +60,8 @@ BANNER = """
   ██████╔╝██║  ██║██║██║  ██║██║  ██║
   ╚═════╝ ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝[/bold red]
 [cyan]              Autonomous AI Pentester[/cyan]
-[dim]         11 providers · 16 agents · AGPL-3.0[/dim]
-[bold #cc0000]                  v0.4.32[/bold #cc0000]
+[dim]         11 providers · {TOTAL_AGENTS} agents · AGPL-3.0[/dim]
+[bold #cc0000]                  v0.4.55[/bold #cc0000]
 """
 
 def check_ollama():
@@ -50,7 +77,7 @@ def check_ollama():
     return None
 
 @click.group(invoke_without_command=True)
-@click.version_option(version="0.4.32")
+@click.version_option(version=__version__)
 @click.pass_context
 def cli(ctx):
     """Briar — Autonomous AI Pentester"""
@@ -96,9 +123,60 @@ def setup():
         config += f"CUSTOM_MODEL={click.prompt('Model name', default='gpt-4o')}\n"
     else:
         config += f"{provider.upper()}_API_KEY={click.prompt('API Key', hide_input=True)}\n"
+
+    # Default report language (used by every scan + the dashboard; -p/--lang still override)
+    langs = {1: "en", 2: "fr", 3: "es", 4: "de", 5: "it", 6: "pt", 7: "nl", 8: "ar"}
+    console.print("\n[bold]Report language[/bold] — [dim]1.en 2.fr 3.es 4.de 5.it 6.pt 7.nl 8.ar[/dim]")
+    report_lang = langs.get(click.prompt("Language", type=int, default=2), "en")
+    config += f"REPORT_LANG={report_lang}\n"
+
     with open(os.path.expanduser("~/.briar/config"), "w") as f:
         f.write(config)
-    console.print(f"\n[green]Provider: {provider}[/green]")
+    console.print(f"\n[green]Provider: {provider}[/green]  ·  [green]Language: {report_lang}[/green]")
+
+
+@cli.command()
+def demo():
+    """Self-test: scan a built-in vulnerable app (no target, network or API key needed)."""
+    from briar.demo import serve
+    import briar.agents.analyzer as az
+    from briar.agents import run_scan_agents, filter_noise
+    from briar.core.validator import ExploitValidator
+    from briar.core.confidence import apply_confidence
+
+    # Skip the LLM — this proves the DETECTION engine, offline and instant.
+    orig = az.SecurityAnalyzer.analyze_endpoint
+    az.SecurityAnalyzer.analyze_endpoint = (
+        lambda self, url, method="GET", source_hint="", tech_context="", plan_context="":
+        {"url": url, "analysis": "(demo: AI analysis skipped)", "raw": ""})
+    server, url = serve()
+    console.print(Panel.fit(
+        f"[bold green]Briar self-test[/bold green]\n"
+        f"Scanning built-in vulnerable app at [cyan]{url}[/cyan]\n"
+        f"[dim]SQLi + XSS + path traversal — no API key needed[/dim]", title="Demo"))
+    try:
+        findings = run_scan_agents(["recon", "injection", "xss", "traversal", "headers"],
+                                   "ollama", url, max_workers=6)
+        findings, _ = filter_noise(findings)
+        findings = ExploitValidator().validate_all(findings, url)
+        findings = apply_confidence(findings)
+    finally:
+        az.SecurityAnalyzer.analyze_endpoint = orig
+        server.shutdown()
+
+    order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
+    findings.sort(key=lambda f: (0 if f.get("confirmed") else 1, order.get(f.get("severity"), 9)))
+    confirmed = sum(1 for f in findings if f.get("confirmed"))
+    table = Table(title="Demo Results")
+    table.add_column("Type", style="cyan"); table.add_column("Sev"); table.add_column("Endpoint"); table.add_column("Confirmed")
+    for f in findings[:15]:
+        table.add_row(str(f.get("type", "?"))[:32], str(f.get("severity", "?")),
+                      str(f.get("url", "?"))[:46], "yes" if f.get("confirmed") else "")
+    console.print(table)
+    if confirmed:
+        console.print(f"\n[bold green]{len(findings)} findings, {confirmed} CONFIRMED — Briar works.[/bold green]")
+    else:
+        console.print(f"\n[yellow]{len(findings)} findings, {confirmed} confirmed.[/yellow]")
 
 @cli.command()
 @click.option("-u", "--url", required=False, help="Target URL")
@@ -106,10 +184,11 @@ def setup():
 @click.option("-p", "--provider", default=None, help="AI provider (overrides saved config)")
 @click.option("-o", "--output", default="./reports", help="Output dir")
 @click.option("-c", "--config", "config_path", help="YAML config file (auth, rules, target)")
-@click.option("--quick", is_flag=True, help="Quick scan (4 agents)")
-@click.option("--deep", is_flag=True, help="Deep scan (all 16 agents + browser)")
+@click.option("--quick", is_flag=True, help=f"Quick scan ({len(agents_for_mode('quick'))} agents)")
+@click.option("--deep", is_flag=True, help=f"Deep scan (all {TOTAL_AGENTS} agents + browser)")
 @click.option("--resume", "resume_ws", help="Resume a workspace by name")
-def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
+@click.option("--lang", default=None, help="Report language: en, fr, es, de, it, pt, nl, ar")
+def scan(url, repo, provider, output, config_path, quick, deep, resume_ws, lang):
     """Run a pentest scan"""
     # Load saved config (mandatory if no -p flag)
     saved = load_saved_config()
@@ -122,22 +201,37 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
         provider = config.get("provider", provider)
         output = config.get("output", output)
         mode = config.get("mode", "standard")
+        lang = lang or config.get("lang")
         auth_flow = build_login_flow(config)
         console.print(f"[dim]Config loaded: {len(config.get('rules',{}).get('avoid',[]))} avoid rules, auth={'yes' if auth_flow else 'no'}[/dim]")
     else:
         auth_flow = None
 
-    # Resolve provider: -p flag > YAML config > saved config > ERROR
+    # Resolve provider: -p flag > YAML config > registered API(s). Ask if several.
     if not provider:
-        if saved:
-            provider = saved.get('PROVIDER', '')
-        if not provider:
-            console.print(Panel.fit(
-                "[bold red]No AI provider configured[/bold red]\n\n"
-                "[dim]Run [cyan]briar setup[/cyan] to choose a provider.\n"
-                "Or use [cyan]-p PROVIDER[/cyan] flag.[/dim]",
-                title="Error"))
-            sys.exit(1)
+        regs = registered_providers(saved)
+        if not regs:
+            # No API key registered — use local Ollama only if it is actually running
+            if check_ollama():
+                provider = "ollama"
+                console.print("[dim]No API key registered — falling back to local Ollama.[/dim]")
+            else:
+                console.print(Panel.fit(
+                    "[bold red]No AI provider configured[/bold red]\n\n"
+                    "[dim]Run [cyan]briar setup[/cyan] to register an API key,\n"
+                    "start Ollama, or pass [cyan]-p PROVIDER[/cyan].[/dim]",
+                    title="Error"))
+                sys.exit(1)
+        elif len(regs) == 1:
+            provider = regs[0]
+        else:
+            # Several registered APIs — let the user pick
+            console.print("\n[bold]Plusieurs API enregistrées — choisis le provider :[/bold]")
+            for i, p in enumerate(regs, 1):
+                tag = " [dim](défaut)[/dim]" if i == 1 else ""
+                console.print(f"  [cyan]{i}[/cyan]. {p}{tag}")
+            choice = click.prompt("Provider #", type=click.IntRange(1, len(regs)), default=1)
+            provider = regs[choice - 1]
 
     # Show what we're using
     api_key_env = f"{provider.upper()}_API_KEY"
@@ -151,8 +245,19 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
     if not url:
         console.print("[red]URL required (-u or config file)[/red]"); sys.exit(1)
 
+    # Normalize target: a bare domain (no scheme) silently breaks all HTTP probing
+    from briar.core.http import normalize_url
+    normalized = normalize_url(url)
+    if normalized != url:
+        console.print(f"[dim]Target normalized: {url} -> {normalized}[/dim]")
+        url = normalized
+
     mode = "deep" if deep else "quick" if quick else "standard"
-    agent_count = 16 if deep else 4 if quick else 8
+    # Report language: --lang > config file > saved config > English
+    lang = (lang or (saved.get("REPORT_LANG") if saved else None) or "en").lower()
+    os.environ["BRIAR_REPORT_LANG"] = lang
+    # Cap every agent's per-request timeout (huge lever on slow targets). User-overridable.
+    os.environ.setdefault("BRIAR_HTTP_TIMEOUT", "6")
 
     # Resume existing workspace
     from briar.core.workspace import Workspace
@@ -160,8 +265,7 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
     if resume_ws:
         ws = Workspace.load(resume_ws)
         findings = ws.get_findings()
-        all_agents = ["recon","planner","gitbackup","jwt","cve","injection","xss","ssrf","auth","authz","csrf","upload","traversal","rce","api","secrets"]
-        agents_to_run = ws.get_remaining_agents(all_agents)
+        agents_to_run = ws.get_remaining_agents(agents_for_mode(mode))
         console.print(Panel.fit(
             f"[bold red]Briar Resume[/bold red]\n"
             f"[cyan]{url}[/cyan] | [yellow]{provider}[/yellow] | [dim]{len(findings)} findings so far, {len(agents_to_run)} agents left[/dim]",
@@ -169,12 +273,11 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
     else:
         ws = Workspace(url, mode)
         findings = []
-        all_agents = ["recon","planner","gitbackup","jwt","cve","injection","xss","ssrf","auth","authz","csrf","upload","traversal","rce","api","secrets"]
-        agents_to_run = all_agents[:agent_count]
+        agents_to_run = agents_for_mode(mode)
 
     console.print(Panel.fit(
         f"[bold red]Briar Scan[/bold red]\n"
-        f"[cyan]{url}[/cyan] | [yellow]{provider}[/yellow] | [dim]{mode} ({agent_count} agents)[/dim]"
+        f"[cyan]{url}[/cyan] | [yellow]{provider}[/yellow] | [dim]{mode} ({len(agents_to_run)} agents)[/dim]"
         + (f"\n[dim]Workspace: {ws.name}[/dim]" if ws else ""),
         title="Scan"))
 
@@ -201,42 +304,34 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
         import time
         scan_start = time.time()
         task = progress.add_task("[cyan]Scanning...", total=len(agents_to_run))
-        from briar.agents import run_agent
+        from briar.agents import run_scan_agents
 
-        provider_errors = 0
-        recon_data = None
-        sylph = SylphAnimation(len(agents_to_run))
-        for idx, agent_name in enumerate(agents_to_run):
-            progress.update(task, description=f"[{idx+1}/{len(agents_to_run)}] [yellow]{agent_name}...[/yellow]")
-            try:
-                result = run_agent(agent_name, provider, url=url, repo_path=repo, recon_data=recon_data)
-                if result and "error" not in result:
-                    findings.append(result)
-                    ws.checkpoint_agent(agent_name, [result])
-                    provider_errors = 0  # Reset on success
-                elif result and "error" in result:
-                    provider_errors += 1
-                    if provider_errors >= 3:
-                        progress.update(task, description=f"[red]Provider failing — aborting[/red]")
-                        console.print(f"[red]Provider '{provider}' returned {provider_errors} errors. Check your API key.[/red]")
-                        break
-                    ws.checkpoint_agent(agent_name, [])
-                # Store recon findings for subsequent agents
-                if agent_name == "recon" and result:
-                    recon_data = result
-                # Pass recon to planner
-                if agent_name == "planner":
-                    result = run_agent("planner", provider, url=url, recon_data=recon_data)
-            except Exception as e:
-                console.print(f"[red]  ⚡ {agent_name}: {e}[/red]")
-                provider_errors += 1
-                if provider_errors >= 3:
-                    progress.update(task, description=f"[red]Provider failing — aborting[/red]")
-                    console.print(f"[red]Provider '{provider}' crashed {provider_errors} times. Check configuration.[/red]")
-                    break
+        total_agents = len(agents_to_run)
+        completed = [0]
+        sylph = SylphAnimation(total_agents)
+
+        def on_result(name, result):
+            # Progress + live checkpoint only. The authoritative findings list is the
+            # RETURN value of run_scan_agents (which includes per-endpoint findings that
+            # on_result dedups away for progress).
+            completed[0] += 1
+            ws.checkpoint_agent(name, [result] if result and "error" not in result else [])
+            progress.update(task, description=f"[{completed[0]}/{total_agents}] [yellow]{name}[/yellow]")
             progress.advance(task)
-            sylph.update(idx, agent_name)
+            sylph.update(completed[0] - 1, name)
             console.print(sylph.render())
+
+        # Agents run concurrently: recon first (feeds tech context), then a thread pool.
+        # Use the RETURN value — it holds every finding, including per-endpoint ones.
+        findings += run_scan_agents(agents_to_run, provider, url, on_result=on_result,
+                                    lang=lang, max_workers=10, repo_path=repo)
+
+        # Always-visible diagnostic: what recon actually mapped (survives the progress UI)
+        _recon = next((f for f in findings if f.get("agent") == "Recon"), {})
+        console.print(f"[dim]Recon: {_recon.get('endpoints_discovered', 0)} URLs crawled, "
+                      f"{len(_recon.get('endpoints', []))} param-endpoints to attack on {url}[/dim]")
+        if _recon.get("crawl_errors"):
+            console.print(f"[yellow]Crawl note: {_recon['crawl_errors'][0]}[/yellow]")
 
         # Sort findings by severity (Critical first)
         sev_order = {"Critical":0, "High":1, "Medium":2, "Low":3, "Info":4, "Error":5}
@@ -276,6 +371,12 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
         validator = ExploitValidator()
         findings = validator.validate_all(findings, url)
         progress.update(task, description=f"[dim]{validator.summary()}[/dim]")
+        # Evidence-based confidence scoring (flags unproven High/Critical)
+        try:
+            from briar.core.confidence import apply_confidence
+            findings = apply_confidence(findings)
+        except Exception:
+            pass
         
         # Deep mode: active exploits
         if deep:
@@ -362,14 +463,17 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
                     "analysis": f"Browser exploit failed: {e}"
                 })
         
-        # Charts
-        progress.update(task, description="[green]Generating charts...")
-        from briar.charts.generator import ChartGenerator
-        cg = ChartGenerator(findings, f"{output}/charts")
-        cg.severity_donut()
-        cg.endpoint_heatmap()
-        cg.type_bar()
-        cg.agent_bar()
+        # Charts (optional — matplotlib is an extra; never crash the scan without it)
+        try:
+            progress.update(task, description="[green]Generating charts...")
+            from briar.charts.generator import ChartGenerator
+            cg = ChartGenerator(findings, f"{output}/charts")
+            cg.severity_donut()
+            cg.endpoint_heatmap()
+            cg.type_bar()
+            cg.agent_bar()
+        except Exception:
+            pass
         
         # Reports
         progress.update(task, description="[green]Generating reports...")
@@ -381,6 +485,17 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
         from briar.reports.obsidian import ObsidianGenerator
         og = ObsidianGenerator(url, findings, f"{output}/obsidian")
         og.generate()
+
+        # Expert report — professional HTML + PDF (print-ready)
+        expert_res = {}
+        try:
+            progress.update(task, description="[green]Generating expert report...")
+            from briar.reports.expert import ExpertReport
+            expert_res = ExpertReport(url, findings, output,
+                {"scanner": "Briar", "version": __version__, "mode": mode,
+                 "provider": provider, "lang": lang}).generate()
+        except Exception:
+            pass
         
         # Slides
         from briar.slides.pptx_gen import SlideGenerator
@@ -391,15 +506,64 @@ def scan(url, repo, provider, output, config_path, quick, deep, resume_ws):
         
         progress.advance(task)
     
+    # Severity breakdown + CONFIDENCE-WEIGHTED risk verdict.
+    # An UNPROVEN finding (heuristic, not replayed) counts a quarter — a report must
+    # not scream "High 100/100" off unconfirmed guesses. Confirmed = full weight.
+    sev_counts = {lvl: sum(1 for f in findings if f.get("severity") == lvl)
+                  for lvl in ["Critical", "High", "Medium", "Low", "Info"]}
+    confirmed = sum(1 for f in findings if f.get("confirmed"))
+    _sevw = {"Critical": 30, "High": 12, "Medium": 4, "Low": 1, "Info": 0}
+    score = 0.0
+    for f in findings:
+        w = _sevw.get(f.get("severity"), 0)
+        score += w if f.get("confirmed") else w * 0.25
+    if any(f.get("confirmed") and f.get("severity") == "Critical" for f in findings):
+        score = max(score, 90)
+    elif any(f.get("confirmed") and f.get("severity") == "High" for f in findings):
+        score = max(score, 60)
+    score = min(100, int(round(score)))
+    if score >= 70:
+        risk, rc = "Critical", "magenta"
+    elif score >= 40:
+        risk, rc = "High", "red"
+    elif score >= 15:
+        risk, rc = "Medium", "yellow"
+    elif score > 0:
+        risk, rc = "Low", "green"
+    else:
+        risk, rc = "Clean", "green"
+    if confirmed == 0 and risk not in ("Clean",):
+        risk += " (unverified)"
+
     table = Table(title="Scan Complete")
     table.add_column("Metric", style="cyan"); table.add_column("Value", style="green")
+    _recon = next((f for f in findings if f.get("agent") == "Recon"), {})
     table.add_row("Target", url)
     table.add_row("Mode", f"{mode} ({len(agents_to_run)} agents)")
+    table.add_row("Attack surface", f"{_recon.get('endpoints_discovered', 0)} URLs, "
+                  f"{len(_recon.get('endpoints', []))} param-endpoints")
+    if _recon.get("crawl_errors"):
+        table.add_row("Crawl note", str(_recon["crawl_errors"][0])[:60])
+    if not _recon:
+        table.add_row("Recon", "[red]no recon result (target unreachable?)[/red]")
     table.add_row("Findings", str(len(findings)))
+    sev_colors = {"Critical": "magenta", "High": "red", "Medium": "yellow", "Low": "bright_yellow", "Info": "blue"}
+    for lvl in ["Critical", "High", "Medium", "Low", "Info"]:
+        if sev_counts[lvl]:
+            table.add_row(f"  {lvl}", f"[{sev_colors[lvl]}]{sev_counts[lvl]}[/{sev_colors[lvl]}]")
+    if confirmed:
+        table.add_row("Confirmed", f"[bold green]{confirmed}[/bold green]")
     for fmt, path in reports.items():
         table.add_row(f"Report ({fmt})", path)
+    if expert_res.get("pdf"):
+        table.add_row("Expert PDF", f"[bold]{expert_res['pdf']}[/bold]")
+    elif expert_res.get("html"):
+        table.add_row("Expert HTML", expert_res["html"])
     table.add_row("Charts", f"{output}/charts/")
     console.print(table)
+    console.print(Panel.fit(
+        f"[bold {rc}]RISK: {risk}[/bold {rc}]   score {score}/100   ·   {len(findings)} findings, {confirmed} confirmed",
+        title="Verdict"))
     console.print("\n[dim]Open reports or launch dashboard: briar serve[/dim]")
 
 @cli.command()
@@ -420,7 +584,7 @@ def resume(workspace_name):
                     console.print(f"  {w}")
             sys.exit(1)
         console.print(f"[green]Resuming workspace: {workspace_name}[/green]")
-        console.print("[dim]Run: briar scan --resume {workspace_name}[/dim]")
+        console.print(f"[dim]Run: briar scan --resume {workspace_name}[/dim]")
     else:
         workspaces = Workspace.list_workspaces()
         if not workspaces:

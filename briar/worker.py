@@ -17,27 +17,18 @@ def save_jobs(jobs):
         json.dump(jobs, f, indent=2)
 
 def process_job(job):
-    """Execute a single scan job"""
-    from briar.agents import run_agent
+    """Execute a single scan job (concurrent pipeline, same as CLI/dashboard)."""
+    from briar.agents import agents_for_mode, run_scan_agents, filter_noise
     url = job["url"]
     provider = job.get("provider", "ollama")
     mode = job.get("mode", "standard")
-    agent_count = 12 if mode == "deep" else 4 if mode == "quick" else 8
+    lang = job.get("lang")
+    os.environ.setdefault("BRIAR_HTTP_TIMEOUT", "6")
 
-    all_agents = ["recon","injection","xss","ssrf","auth","authz","csrf","upload","traversal","rce","api","secrets"]
-    agents = all_agents[:agent_count]
-    findings = 0
-    errors = 0
-
-    for agent_name in agents:
-        try:
-            result = run_agent(agent_name, provider, url=url)
-            if result and "error" not in result:
-                findings += 1
-        except:
-            errors += 1
-
-    return {"url": url, "findings": findings, "errors": errors, "agents_ran": len(agents)}
+    agents = agents_for_mode(mode)
+    findings = run_scan_agents(agents, provider, url, lang=lang)
+    findings, _ = filter_noise(findings)
+    return {"url": url, "findings": len(findings), "errors": 0, "agents_ran": len(agents)}
 
 def main():
     print("🥀 Briar Worker v0.1.0 — waiting for jobs...")

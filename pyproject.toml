@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "briar-pentest"
-version = "0.4.32"
+version = "0.4.55"
 description = "Autonomous AI Pentester — find vulnerabilities before hackers do"
 readme = "README.md"
 license = {text = "AGPL-3.0"}
@@ -16,20 +16,27 @@ classifiers = [
     "Intended Audience :: Information Technology",
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Security",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "requests>=2.31",
     "click>=8.1",
     "rich>=13.7",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "markdown>=3.5",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
 full = [
     "python-docx>=1.1",
     "openpyxl>=3.1",
